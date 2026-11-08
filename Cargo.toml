@@ -1,6 +1,6 @@
 [package]
 name = "devsticky"
-version = "0.1.1"
+version = "0.2.1"
 edition = "2024"
 description = "Sticky notes for developers: Markdown, code snippets, tags and search"
 license = "MIT"
