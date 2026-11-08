@@ -95,7 +95,7 @@ impl ksni::Tray for DevStickyTray {
             .into(),
             ksni::MenuItem::Separator,
             StandardItem {
-                label: "Quit DevSticky".into(),
+                label: "Quit".into(),
                 icon_name: "application-exit-symbolic".into(),
                 activate: Box::new(|t: &mut Self| {
                     let _ = t.tx.send_blocking(TrayEvent::Quit);

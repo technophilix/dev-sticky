@@ -47,6 +47,19 @@ cargo run --release        # just try it
 ./scripts/package.sh       # build .deb and .rpm into dist/
 ```
 
+## Uninstall
+
+```sh
+./scripts/uninstall.sh           # remove DevSticky, keep your notes
+./scripts/uninstall.sh --purge   # also delete your notes
+```
+
+This removes the `~/.local` install, the "Start at Login" entry, and the
+`.deb`/`.rpm` package if one is installed (asks for your sudo password).
+Installed from a package? `sudo apt remove devsticky` or `sudo dnf remove devsticky`
+also works, but leaves the Start at Login entry and your notes in
+`~/.local/share/devsticky`.
+
 Pushing a tag like `v0.1.0` to GitHub builds both packages on Ubuntu 24.04 and
 Fedora 41 and attaches them to a GitHub Release (`.github/workflows/release.yml`).
 

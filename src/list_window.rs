@@ -382,19 +382,14 @@ pub fn build(app: &adw::Application, state: &Rc<AppState>) -> Panel {
 
     let weak = Rc::downgrade(&list);
     let app_weak = app.downgrade();
-    list_view.connect_activate(move |lv, pos| {
+    list_view.connect_activate(move |_, pos| {
         let (Some(list), Some(app)) = (weak.upgrade(), app_weak.upgrade()) else {
             return;
         };
         if let Some(obj) = list.model.item(pos).and_downcast::<glib::BoxedAnyObject>() {
             let id = obj.borrow::<NoteSummary>().id.clone();
+            // The list stays open, so closing the note leaves the search and list in place.
             crate::note_window::open(&app, &list.state, &id, None);
-            // As a quick panel, get out of the way once a note is picked.
-            if list.state.tray_active.get()
-                && let Some(win) = lv.root().and_downcast::<gtk::Window>()
-            {
-                win.set_visible(false);
-            }
         }
     });
 
