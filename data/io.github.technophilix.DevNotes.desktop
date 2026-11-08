@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=DevNotes
+GenericName=Sticky Notes
+Comment=Sticky notes for developers: Markdown, code snippets, tags and search
+Exec=devnotes
+Icon=io.github.technophilix.DevNotes
+Terminal=false
+Categories=Development;
+Keywords=notes;sticky;snippets;markdown;todo;
+StartupNotify=true
+Actions=new-note;
+
+[Desktop Action new-note]
+Name=New Note
+Exec=devnotes --new-note
