@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
 use crate::db::{self, Store};
 use crate::model::{self, Note};
 
-const FORMAT: &str = "devnotes";
+const FORMAT: &str = "devsticky";
+/// Files exported before the app was renamed from DevNotes.
+const LEGACY_FORMAT: &str = "devnotes";
 const VERSION: u32 = 1;
 
 #[derive(Serialize, Deserialize)]
@@ -65,9 +67,9 @@ impl ImportReport {
     }
 }
 
-/// Suggested file name, e.g. `devnotes-2026-11-08.json`.
+/// Suggested file name, e.g. `devsticky-2026-11-08.json`.
 pub fn default_file_name() -> String {
-    format!("devnotes-{}.json", chrono::Local::now().format("%Y-%m-%d"))
+    format!("devsticky-{}.json", chrono::Local::now().format("%Y-%m-%d"))
 }
 
 /// Serializes every note to pretty JSON. Returns the JSON and the note count.
@@ -98,12 +100,12 @@ pub fn export(store: &Store) -> Result<(String, usize)> {
 /// Merges notes from an exported JSON file into the store, all in one transaction.
 pub fn import(store: &Store, json: &str) -> Result<ImportReport> {
     let file: ExportFile =
-        serde_json::from_str(json).context("this doesn't look like a DevNotes export file")?;
-    if file.format != FORMAT {
-        bail!("this doesn't look like a DevNotes export file");
+        serde_json::from_str(json).context("this doesn't look like a DevSticky export file")?;
+    if file.format != FORMAT && file.format != LEGACY_FORMAT {
+        bail!("this doesn't look like a DevSticky export file");
     }
     if file.version > VERSION {
-        bail!("this file is from a newer DevNotes version; please update DevNotes first");
+        bail!("this file is from a newer DevSticky version; please update DevSticky first");
     }
 
     store.in_transaction(|| {
@@ -241,14 +243,22 @@ mod tests {
     }
 
     #[test]
+    fn accepts_files_from_before_the_rename() {
+        let s = Store::open_in_memory().unwrap();
+        let old = r#"{"format":"devnotes","version":1,"exported_at":0,"notes":[
+            {"id":"a","body":"old note","created_at":1,"updated_at":2}]}"#;
+        assert_eq!(import(&s, old).unwrap().added, 1);
+    }
+
+    #[test]
     fn rejects_foreign_files_and_sanitizes() {
         let s = Store::open_in_memory().unwrap();
         assert!(import(&s, "{\"hello\": 1}").is_err());
         assert!(import(&s, "not json").is_err());
-        let newer = r#"{"format":"devnotes","version":99,"exported_at":0,"notes":[]}"#;
+        let newer = r#"{"format":"devsticky","version":99,"exported_at":0,"notes":[]}"#;
         assert!(import(&s, newer).unwrap_err().to_string().contains("newer"));
 
-        let odd = r##"{"format":"devnotes","version":1,"exported_at":0,"notes":[
+        let odd = r##"{"format":"devsticky","version":1,"exported_at":0,"notes":[
             {"id":"n1","body":"# Hi","tags":["#Bug","bug","we ird"],"color":"neon","created_at":1,"updated_at":2},
             {"id":"","body":"no id","created_at":1,"updated_at":2}
         ]}"##;

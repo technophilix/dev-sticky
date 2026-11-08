@@ -25,8 +25,9 @@ struct Editor {
     toasts: adw::ToastOverlay,
     pending_save: RefCell<Option<glib::SourceId>>,
     deleted: Cell<bool>,
-    /// True until the note has any content; empty new notes are discarded on close.
-    is_blank_new: Cell<bool>,
+    /// For a just-created note: its starting text. If it is closed unchanged
+    /// (still empty, or still just the to-do template) it is discarded.
+    discard_if_unchanged: RefCell<Option<String>>,
     /// Set while replacing the editor contents from the store, so that isn't saved back.
     loading: Cell<bool>,
 }
@@ -93,11 +94,8 @@ impl Editor {
     /// Persists the in-memory note and tells the rest of the app.
     fn write(&self) {
         let mut note = self.note.borrow_mut();
-        if !note.body.trim().is_empty() || !note.tags.is_empty() {
-            self.is_blank_new.set(false);
-        }
         if let Err(e) = self.state.store.save(&mut note) {
-            eprintln!("devnotes: saving note failed: {e:#}");
+            eprintln!("devsticky: saving note failed: {e:#}");
             drop(note);
             self.toast("Could not save note");
             return;
@@ -124,7 +122,79 @@ impl Editor {
                 ed.copy(text);
             }
         });
-        markdown::render_into(&self.preview, &self.current_body(), on_copy);
+        let weak = Rc::downgrade(self);
+        let on_task: markdown::TaskFn = Rc::new(move |offset, done| {
+            if let Some(ed) = weak.upgrade() {
+                ed.set_task(offset, done);
+            }
+        });
+        markdown::render_into(&self.preview, &self.current_body(), on_copy, on_task);
+    }
+
+    /// A preview checkbox was clicked: write "[x]" / "[ ]" back into the text.
+    /// Same-length edit, so the other checkboxes' offsets stay valid.
+    fn set_task(&self, offset: usize, done: bool) {
+        let body = self.current_body();
+        let Some(pos) = markdown::task_state_char_offset(&body, offset) else {
+            return;
+        };
+        let mut start = self.buffer.iter_at_offset(pos as i32);
+        let mut end = start;
+        end.forward_char();
+        self.buffer.delete(&mut start, &mut end);
+        self.buffer.insert(&mut start, if done { "x" } else { " " });
+    }
+
+    /// Ctrl+T: tick/untick the checkbox on the cursor's line, or make the line one.
+    fn toggle_task_at_cursor(&self) {
+        let cursor = self.buffer.iter_at_mark(&self.buffer.get_insert());
+        let mut start = cursor;
+        start.set_line_offset(0);
+        let mut end = start;
+        if !end.ends_line() {
+            end.forward_to_line_end();
+        }
+        let line = self.buffer.text(&start, &end, false).to_string();
+        let new = model::toggle_task_line(&line);
+        let line_no = start.line();
+        self.buffer.begin_user_action();
+        self.buffer.delete(&mut start, &mut end);
+        self.buffer.insert(&mut start, &new);
+        self.buffer.end_user_action();
+        // Leave the cursor at the end of the edited line.
+        if let Some(mut it) = self.buffer.iter_at_line(line_no) {
+            if !it.ends_line() {
+                it.forward_to_line_end();
+            }
+            self.buffer.place_cursor(&it);
+        }
+    }
+
+    /// Enter in a list: start the next item ("- [ ] " for to-dos), or end the
+    /// list if the current item is empty. Returns false to let Enter work normally.
+    fn handle_enter(&self) -> bool {
+        if self.buffer.has_selection() {
+            return false;
+        }
+        let cursor = self.buffer.iter_at_mark(&self.buffer.get_insert());
+        let mut line_start = cursor;
+        line_start.set_line_offset(0);
+        let before = self.buffer.text(&line_start, &cursor, false).to_string();
+        match model::list_enter(&before) {
+            Some(model::ListEnter::Continue(prefix)) => {
+                let mut at = cursor;
+                self.buffer.begin_user_action();
+                self.buffer.insert(&mut at, &format!("\n{prefix}"));
+                self.buffer.end_user_action();
+                true
+            }
+            Some(model::ListEnter::EndList) => {
+                let (mut a, mut b) = (line_start, cursor);
+                self.buffer.delete(&mut a, &mut b);
+                true
+            }
+            None => false,
+        }
     }
 
     fn confirm_delete(self: &Rc<Self>) {
@@ -153,7 +223,7 @@ impl Editor {
                     ed.window.close();
                 }
                 Err(e) => {
-                    eprintln!("devnotes: delete failed: {e:#}");
+                    eprintln!("devsticky: delete failed: {e:#}");
                     ed.toast("Could not delete note");
                 }
             }
@@ -185,7 +255,7 @@ impl Editor {
             a.set_state(&note.pinned.to_variant());
         }
         self.window.set_title(Some(&note.title));
-        self.is_blank_new.set(false);
+        self.discard_if_unchanged.replace(None);
         *self.note.borrow_mut() = note;
         if self.stack.visible_child_name().as_deref() == Some("preview") {
             self.render_preview();
@@ -295,9 +365,42 @@ fn add_actions(ed: &Rc<Editor>) {
         }
     });
     win.add_action(&reload);
+
+    // The note was deleted from the list's right-click menu: close without saving.
+    let discard = gio::SimpleAction::new("discard", None);
+    let weak = Rc::downgrade(ed);
+    discard.connect_activate(move |_, _| {
+        if let Some(ed) = weak.upgrade() {
+            if let Some(id) = ed.pending_save.take() {
+                id.remove();
+            }
+            ed.deleted.set(true);
+            ed.window.close();
+        }
+    });
+    win.add_action(&discard);
+
+    let toggle_task = gio::SimpleAction::new("toggle-task", None);
+    let weak = Rc::downgrade(ed);
+    toggle_task.connect_activate(move |_, _| {
+        if let Some(ed) = weak.upgrade() {
+            if ed.stack.visible_child_name().as_deref() != Some("edit") {
+                ed.stack.set_visible_child_name("edit");
+            }
+            ed.toggle_task_at_cursor();
+        }
+    });
+    win.add_action(&toggle_task);
 }
 
-fn build(app: &adw::Application, state: &Rc<AppState>, note: Note) -> Rc<Editor> {
+/// `new_from`: the starting text of a note that was just created (it opens in
+/// edit mode and is discarded if closed unchanged); None for existing notes.
+fn build(
+    app: &adw::Application,
+    state: &Rc<AppState>,
+    note: Note,
+    new_from: Option<String>,
+) -> Rc<Editor> {
     // Editor
     let buffer = sourceview5::Buffer::new(None::<&gtk::TextTagTable>);
     if let Some(lang) = sourceview5::LanguageManager::default().language("markdown") {
@@ -348,9 +451,9 @@ fn build(app: &adw::Application, state: &Rc<AppState>, note: Note) -> Rc<Editor>
         "Preview",
         "view-reveal-symbolic",
     );
-    // Existing notes open rendered; new ones open ready for typing.
-    let is_blank = note.body.trim().is_empty();
-    stack.set_visible_child_name(if is_blank { "edit" } else { "preview" });
+    // Existing notes open rendered; new and empty ones open ready for typing.
+    let editing = new_from.is_some() || note.body.trim().is_empty();
+    stack.set_visible_child_name(if editing { "edit" } else { "preview" });
 
     // Tags
     let tags_entry = gtk::Entry::builder()
@@ -378,6 +481,13 @@ fn build(app: &adw::Application, state: &Rc<AppState>, note: Note) -> Rc<Editor>
             .icon_name("view-more-symbolic")
             .menu_model(&build_menu())
             .tooltip_text("Note Menu")
+            .build(),
+    );
+    header.pack_start(
+        &gtk::Button::builder()
+            .icon_name("object-select-symbolic")
+            .tooltip_text("Checkbox: add or tick (Ctrl+T)")
+            .action_name("win.toggle-task")
             .build(),
     );
     let copy_btn = gtk::Button::builder()
@@ -415,18 +525,37 @@ fn build(app: &adw::Application, state: &Rc<AppState>, note: Note) -> Rc<Editor>
         toasts,
         pending_save: RefCell::default(),
         deleted: Cell::new(false),
-        is_blank_new: Cell::new(is_blank),
+        discard_if_unchanged: RefCell::new(new_from),
         loading: Cell::new(false),
     });
     ed.update_style_scheme();
     add_actions(&ed);
-    if !is_blank {
+    if !editing {
         ed.render_preview();
         // Otherwise the first selectable preview label grabs focus and selects all its text.
         GtkWindowExt::set_focus(&window, Some(&copy_btn));
     } else {
         view.grab_focus();
     }
+
+    let keys = gtk::EventControllerKey::new();
+    keys.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let weak = Rc::downgrade(&ed);
+    keys.connect_key_pressed(move |_, key, _, mods| {
+        let plain = !mods.intersects(
+            gtk::gdk::ModifierType::SHIFT_MASK
+                | gtk::gdk::ModifierType::CONTROL_MASK
+                | gtk::gdk::ModifierType::ALT_MASK,
+        );
+        if plain
+            && matches!(key, gtk::gdk::Key::Return | gtk::gdk::Key::KP_Enter)
+            && weak.upgrade().is_some_and(|ed| ed.handle_enter())
+        {
+            return glib::Propagation::Stop;
+        }
+        glib::Propagation::Proceed
+    });
+    view.add_controller(keys);
 
     let weak = Rc::downgrade(&ed);
     ed.buffer.connect_changed(move |_| {
@@ -470,8 +599,11 @@ fn build(app: &adw::Application, state: &Rc<AppState>, note: Note) -> Rc<Editor>
         owner.flush();
         let id = owner.note.borrow().id.clone();
         owner.state.unregister_window(&id);
-        if owner.is_blank_new.get() && !owner.deleted.get() {
-            // Never-used note: drop it entirely instead of leaving an empty one behind.
+        let unchanged = owner.discard_if_unchanged.borrow().as_deref().is_some_and(|t| {
+            owner.current_body().trim() == t.trim() && owner.tags_entry.text().trim().is_empty()
+        });
+        if unchanged && !owner.deleted.get() {
+            // Never-used new note: drop it entirely instead of leaving it behind.
             let _ = owner.state.store.purge(&id);
             owner.state.notes_changed();
         }
@@ -487,6 +619,16 @@ fn build(app: &adw::Application, state: &Rc<AppState>, note: Note) -> Rc<Editor>
 /// Opens (or focuses) the window for note `id`. `token` is a Wayland
 /// activation token, needed when opening from the tray so the window gets focus.
 pub fn open(app: &adw::Application, state: &Rc<AppState>, id: &str, token: Option<&str>) {
+    open_note(app, state, id, token, None);
+}
+
+fn open_note(
+    app: &adw::Application,
+    state: &Rc<AppState>,
+    id: &str,
+    token: Option<&str>,
+    new_from: Option<String>,
+) {
     let present = |win: &adw::ApplicationWindow| {
         if let Some(t) = token {
             win.set_startup_id(t);
@@ -499,22 +641,30 @@ pub fn open(app: &adw::Application, state: &Rc<AppState>, id: &str, token: Optio
     }
     match state.store.get(id) {
         Ok(Some(note)) => {
-            let ed = build(app, state, note);
+            let ed = build(app, state, note, new_from);
             state.register_window(id, &ed.window);
             present(&ed.window);
         }
         Ok(None) => {}
-        Err(e) => eprintln!("devnotes: loading note failed: {e:#}"),
+        Err(e) => eprintln!("devsticky: loading note failed: {e:#}"),
     }
 }
 
-/// Creates a new empty note and opens it.
-pub fn create(app: &adw::Application, state: &Rc<AppState>, token: Option<&str>) {
-    match state.store.create() {
+/// Creates a new note starting with `template` ("" for a blank note,
+/// [`model::TODO_TEMPLATE`] for a to-do list) and opens it for editing.
+pub fn create(app: &adw::Application, state: &Rc<AppState>, token: Option<&str>, template: &str) {
+    let result = state.store.create().and_then(|mut note| {
+        if !template.is_empty() {
+            note.body = template.to_string();
+            state.store.save(&mut note)?;
+        }
+        Ok(note)
+    });
+    match result {
         Ok(note) => {
             state.notes_changed();
-            open(app, state, &note.id, token);
+            open_note(app, state, &note.id, token, Some(template.to_string()));
         }
-        Err(e) => eprintln!("devnotes: creating note failed: {e:#}"),
+        Err(e) => eprintln!("devsticky: creating note failed: {e:#}"),
     }
 }

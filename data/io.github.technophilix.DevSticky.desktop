@@ -1,16 +1,20 @@
 [Desktop Entry]
 Type=Application
-Name=DevNotes
+Name=DevSticky
 GenericName=Sticky Notes
 Comment=Sticky notes for developers: Markdown, code snippets, tags and search
-Exec=devnotes
-Icon=io.github.technophilix.DevNotes
+Exec=devsticky
+Icon=io.github.technophilix.DevSticky
 Terminal=false
 Categories=Development;
 Keywords=notes;sticky;snippets;markdown;todo;
 StartupNotify=true
-Actions=new-note;
+Actions=new-note;new-todo;
 
 [Desktop Action new-note]
 Name=New Note
-Exec=devnotes --new-note
+Exec=devsticky --new-note
+
+[Desktop Action new-todo]
+Name=New To-do List
+Exec=devsticky --new-todo

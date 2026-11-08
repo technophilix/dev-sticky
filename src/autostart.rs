@@ -33,7 +33,7 @@ fn entry_contents(exe: &str) -> String {
     format!(
         "[Desktop Entry]\n\
          Type=Application\n\
-         Name=DevNotes\n\
+         Name=DevSticky\n\
          Comment=Sticky notes for developers\n\
          Exec={} --background\n\
          Icon={APP_ID}\n\
@@ -51,7 +51,7 @@ pub fn set_enabled(enabled: bool) -> Result<()> {
         }
         return Ok(());
     }
-    let exe = std::env::current_exe().context("finding the DevNotes executable")?;
+    let exe = std::env::current_exe().context("finding the DevSticky executable")?;
     let exe = exe.to_str().context("executable path is not valid UTF-8")?;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
@@ -66,8 +66,8 @@ mod tests {
 
     #[test]
     fn exec_line_is_quoted() {
-        assert_eq!(quote_exec_arg("/home/a b/devnotes"), "\"/home/a b/devnotes\"");
+        assert_eq!(quote_exec_arg("/home/a b/devsticky"), "\"/home/a b/devsticky\"");
         assert_eq!(quote_exec_arg("/x/$y\"z"), "\"/x/\\$y\\\"z\"");
-        assert!(entry_contents("/usr/bin/devnotes").contains("Exec=\"/usr/bin/devnotes\" --background\n"));
+        assert!(entry_contents("/usr/bin/devsticky").contains("Exec=\"/usr/bin/devsticky\" --background\n"));
     }
 }

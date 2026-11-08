@@ -31,7 +31,7 @@ impl NoteList {
         match self.state.store.list(&self.query.borrow(), offset, limit) {
             Ok(rows) => rows.into_iter().map(glib::BoxedAnyObject::new).collect(),
             Err(e) => {
-                eprintln!("devnotes: listing notes failed: {e:#}");
+                eprintln!("devsticky: listing notes failed: {e:#}");
                 Vec::new()
             }
         }
@@ -87,6 +87,64 @@ impl NoteList {
     }
 }
 
+/// Pops up the Edit / Delete menu for the note shown in `item`, at (x, y) in `row`.
+fn show_row_menu(item: &gtk::ListItem, row: &gtk::Box, x: f64, y: f64) {
+    let Some(obj) = item.item().and_downcast::<glib::BoxedAnyObject>() else {
+        return;
+    };
+    let id = obj.borrow::<NoteSummary>().id.clone();
+    let menu = gio::Menu::new();
+    for (label, action) in [("Edit", "win.open-note"), ("Delete", "win.delete-note")] {
+        let entry = gio::MenuItem::new(Some(label), None);
+        entry.set_action_and_target_value(Some(action), Some(&id.to_variant()));
+        menu.append_item(&entry);
+    }
+    let popover = gtk::PopoverMenu::from_model(Some(&menu));
+    popover.set_parent(row);
+    popover.set_has_arrow(false);
+    popover.set_halign(gtk::Align::Start);
+    popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
+    // The popover is temporary: detach it once it closes.
+    popover.connect_closed(|p| {
+        let p = p.clone();
+        glib::idle_add_local_once(move || p.unparent());
+    });
+    popover.popup();
+}
+
+/// Asks before deleting note `id`, closing its window if it is open.
+fn confirm_delete(window: &adw::ApplicationWindow, state: &Rc<AppState>, id: String) {
+    let title = state
+        .store
+        .get(&id)
+        .ok()
+        .flatten()
+        .map(|n| n.title)
+        .unwrap_or_default();
+    let dialog = adw::AlertDialog::new(
+        Some("Delete Note?"),
+        Some(&format!("“{title}” will be permanently removed.")),
+    );
+    dialog.add_responses(&[("cancel", "Cancel"), ("delete", "Delete")]);
+    dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+    dialog.set_default_response(Some("cancel"));
+    dialog.set_close_response("cancel");
+    let state = state.clone();
+    dialog.connect_response(None, move |_, response| {
+        if response != "delete" {
+            return;
+        }
+        if let Some(w) = state.note_window(&id) {
+            ActionGroupExt::activate_action(&w, "discard", None);
+        }
+        if let Err(e) = state.store.delete(&id) {
+            eprintln!("devsticky: delete failed: {e:#}");
+        }
+        state.notes_changed();
+    });
+    dialog.present(Some(window));
+}
+
 fn row_factory() -> gtk::SignalListItemFactory {
     let factory = gtk::SignalListItemFactory::new();
     factory.connect_setup(|_, item| {
@@ -133,6 +191,26 @@ fn row_factory() -> gtk::SignalListItemFactory {
         row.append(&text);
         item.set_child(Some(&row));
 
+        // Right-click (or long-press on touch): Edit / Delete for this note.
+        let click = gtk::GestureClick::builder().button(gtk::gdk::BUTTON_SECONDARY).build();
+        let (li, r) = (item.downgrade(), row.clone());
+        click.connect_pressed(move |g, _, x, y| {
+            if let Some(item) = li.upgrade() {
+                g.set_state(gtk::EventSequenceState::Claimed);
+                show_row_menu(&item, &r, x, y);
+            }
+        });
+        row.add_controller(click);
+        let press = gtk::GestureLongPress::new();
+        press.set_touch_only(true);
+        let (li, r) = (item.downgrade(), row.clone());
+        press.connect_pressed(move |_, x, y| {
+            if let Some(item) = li.upgrade() {
+                show_row_menu(&item, &r, x, y);
+            }
+        });
+        row.add_controller(press);
+
         // Rebind whenever GTK recycles this row widget for a different note.
         item.connect_item_notify(move |item| {
             let Some(obj) = item.item().and_downcast::<glib::BoxedAnyObject>() else {
@@ -144,7 +222,11 @@ fn row_factory() -> gtk::SignalListItemFactory {
             pin.set_visible(n.pinned);
             snippet.set_label(&n.snippet);
             snippet.set_visible(!n.snippet.is_empty());
-            let mut m: Vec<String> = n.tags.iter().map(|t| format!("#{t}")).collect();
+            let mut m: Vec<String> = Vec::new();
+            if n.tasks.1 > 0 {
+                m.push(format!("☑ {}/{} done", n.tasks.0, n.tasks.1));
+            }
+            m.extend(n.tags.iter().map(|t| format!("#{t}")));
             m.push(model::relative_time(n.updated_at, crate::db::now()));
             meta.set_label(&m.join("  "));
         });
@@ -221,10 +303,15 @@ pub fn build(app: &adw::Application, state: &Rc<AppState>) -> Panel {
     content.add_named(&empty_page, Some("empty"));
 
     let header = adw::HeaderBar::new();
-    let new_btn = gtk::Button::builder()
+    let new_menu = gio::Menu::new();
+    new_menu.append(Some("New Note"), Some("app.new-note"));
+    new_menu.append(Some("New To-do List"), Some("app.new-todo"));
+    let new_btn = adw::SplitButton::builder()
         .icon_name("list-add-symbolic")
         .tooltip_text("New Note (Ctrl+N)")
+        .dropdown_tooltip("More: New To-do List (Ctrl+Shift+N)")
         .action_name("app.new-note")
+        .menu_model(&new_menu)
         .build();
     header.pack_start(&new_btn);
     let menu = gio::Menu::new();
@@ -234,7 +321,7 @@ pub fn build(app: &adw::Application, state: &Rc<AppState>) -> Panel {
     menu.append_section(None, &data);
     let app_section = gio::Menu::new();
     app_section.append(Some("Start at Login"), Some("app.autostart"));
-    app_section.append(Some("About DevNotes"), Some("app.about"));
+    app_section.append(Some("About DevSticky"), Some("app.about"));
     app_section.append(Some("Quit"), Some("app.quit"));
     menu.append_section(None, &app_section);
     header.pack_end(
@@ -254,7 +341,7 @@ pub fn build(app: &adw::Application, state: &Rc<AppState>) -> Panel {
 
     let window = adw::ApplicationWindow::builder()
         .application(app)
-        .title("DevNotes")
+        .title("DevSticky")
         .default_width(400)
         .default_height(640)
         .content(&toasts)
@@ -358,6 +445,24 @@ pub fn build(app: &adw::Application, state: &Rc<AppState>) -> Panel {
         })),
     ));
     window.add_controller(esc);
+
+    // Targets of the right-click menu.
+    let open_note = gio::SimpleAction::new("open-note", Some(glib::VariantTy::STRING));
+    let (st, app_weak) = (state.clone(), app.downgrade());
+    open_note.connect_activate(move |_, param| {
+        if let (Some(app), Some(id)) = (app_weak.upgrade(), param.and_then(|p| p.get::<String>())) {
+            crate::note_window::open(&app, &st, &id, None);
+        }
+    });
+    window.add_action(&open_note);
+    let delete_note = gio::SimpleAction::new("delete-note", Some(glib::VariantTy::STRING));
+    let (st, w) = (state.clone(), window.downgrade());
+    delete_note.connect_activate(move |_, param| {
+        if let (Some(w), Some(id)) = (w.upgrade(), param.and_then(|p| p.get::<String>())) {
+            confirm_delete(&w, &st, id);
+        }
+    });
+    window.add_action(&delete_note);
 
     // Ctrl+F focuses search.
     let focus = gio::SimpleAction::new("focus-search", None);

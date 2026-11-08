@@ -154,7 +154,7 @@ impl Store {
         self.conn.execute(
             "UPDATE notes SET title = ?2, body = ?3, tags = ?4, color = ?5, pinned = ?6,
                               updated_at = ?7
-             WHERE id = ?1",
+             WHERE id = ?1 AND deleted = 0",
             params![
                 note.id,
                 note.title,
@@ -248,7 +248,7 @@ impl Store {
         }
 
         let mut sql = String::from(
-            "SELECT n.id, n.title, substr(n.body, 1, 600), n.tags, n.color, n.pinned, n.updated_at
+            "SELECT n.id, n.title, n.body, n.tags, n.color, n.pinned, n.updated_at
              FROM notes n",
         );
         let mut args: Vec<Value> = Vec::new();
@@ -294,6 +294,7 @@ fn summary_from_row(r: &Row) -> rusqlite::Result<NoteSummary> {
         id: r.get(0)?,
         title: r.get(1)?,
         snippet: model::snippet(&body),
+        tasks: model::task_counts(&body),
         tags: decode_tags(&r.get::<_, String>(3)?),
         color: model::normalize_color(&r.get::<_, String>(4)?).to_string(),
         pinned: r.get(5)?,

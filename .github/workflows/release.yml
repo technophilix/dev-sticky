@@ -1,0 +1,75 @@
+# Builds the .deb and .rpm packages. Runs on every push to main (packages are
+# attached to the workflow run) and publishes a GitHub Release for tags "v*".
+#
+# Packages are built on the oldest supported distros so they also install on
+# newer ones: the .deb on Ubuntu 24.04 (works on Debian 13+, Ubuntu 24.04+, Mint 22+),
+# the .rpm on Fedora 41 (works on Fedora 41+ and similar).
+name: Packages
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  deb:
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential pkg-config curl ca-certificates dpkg-dev \
+            libgtk-4-dev libadwaita-1-dev libgtksourceview-5-dev
+      - name: Install Rust
+        run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+      - name: Test and build .deb
+        run: |
+          . "$HOME/.cargo/env"
+          cargo test --locked
+          cargo install cargo-deb --locked
+          cargo deb --locked
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb
+          path: target/debian/*.deb
+
+  rpm:
+    runs-on: ubuntu-latest
+    container: fedora:41
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: dnf install -y gcc pkgconf-pkg-config gtk4-devel libadwaita-devel gtksourceview5-devel
+      - name: Install Rust
+        run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+      - name: Build .rpm
+        run: |
+          . "$HOME/.cargo/env"
+          cargo build --release --locked
+          cargo install cargo-generate-rpm --locked
+          cargo generate-rpm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm
+          path: target/generate-rpm/*.rpm
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [deb, rpm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

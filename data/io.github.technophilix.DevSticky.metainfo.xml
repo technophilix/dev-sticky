@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.technophilix.DevSticky</id>
+  <name>DevSticky</name>
+  <summary>Sticky notes for developers</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="io.github.technophilix">
+    <name>technophilix</name>
+  </developer>
+  <description>
+    <p>
+      DevSticky keeps your code snippets, commands and to-dos one click away in the top bar.
+    </p>
+    <ul>
+      <li>Markdown notes with syntax-highlighted code blocks and a copy button</li>
+      <li>Tags and instant full-text search</li>
+      <li>Quick search panel from the top-bar icon</li>
+      <li>Note colors, pinning and autosave</li>
+      <li>Fully offline, with export and import to move notes between machines</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.technophilix.DevSticky.desktop</launchable>
+  <categories>
+    <category>Development</category>
+  </categories>
+  <keywords>
+    <keyword>notes</keyword>
+    <keyword>sticky</keyword>
+    <keyword>snippets</keyword>
+    <keyword>markdown</keyword>
+  </keywords>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-11-08"/>
+  </releases>
+</component>

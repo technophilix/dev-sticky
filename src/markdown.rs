@@ -8,6 +8,19 @@ use sourceview5::prelude::*;
 use std::rc::Rc;
 
 pub type CopyFn = Rc<dyn Fn(&str)>;
+/// Called when a checkbox in the preview is clicked: (byte offset of its "[ ]"
+/// in the Markdown source, new checked state).
+pub type TaskFn = Rc<dyn Fn(usize, bool)>;
+
+/// Character offset of the state character (the space or x inside "[ ]") of
+/// the checkbox whose "[" starts at byte `offset` in `body`, if it is one.
+pub fn task_state_char_offset(body: &str, offset: usize) -> Option<usize> {
+    let marker = body.get(offset..offset + 3)?;
+    if !matches!(marker, "[ ]" | "[x]" | "[X]") {
+        return None;
+    }
+    Some(body[..offset].chars().count() + 1)
+}
 
 /// Maps common code-fence names to GtkSourceView language ids.
 pub fn language_for(fence: &str) -> Option<sourceview5::Language> {
@@ -62,6 +75,9 @@ struct Renderer {
     in_table: bool,
     table_cell: usize,
     on_copy: CopyFn,
+    on_task: TaskFn,
+    /// Checkbox for the list item being built: (checked, source offset of "[ ]").
+    task: Option<(bool, usize)>,
 }
 
 impl Renderer {
@@ -77,7 +93,8 @@ impl Renderer {
     fn flush(&mut self) {
         let markup = std::mem::take(&mut self.markup);
         let markup = markup.trim_end();
-        if markup.trim().is_empty() {
+        let task = self.task.take();
+        if markup.trim().is_empty() && task.is_none() {
             return;
         }
         let label = gtk::Label::builder()
@@ -95,7 +112,38 @@ impl Renderer {
         if self.in_table {
             label.add_css_class("monospace");
         }
-        self.root.append(&label);
+        let Some((done, offset)) = task else {
+            self.root.append(&label);
+            return;
+        };
+
+        // To-do item: a real checkbox that writes back to the note.
+        label.set_margin_start(0);
+        label.set_hexpand(true);
+        if done {
+            label.add_css_class("task-done");
+        }
+        let check = gtk::CheckButton::builder()
+            .active(done)
+            .valign(gtk::Align::Start)
+            .build();
+        let on_task = self.on_task.clone();
+        let l = label.clone();
+        check.connect_toggled(move |c| {
+            if c.is_active() {
+                l.add_css_class("task-done");
+            } else {
+                l.remove_css_class("task-done");
+            }
+            on_task(offset, c.is_active());
+        });
+        let row = gtk::Box::builder()
+            .spacing(6)
+            .margin_start(self.indent())
+            .build();
+        row.append(&check);
+        row.append(&label);
+        self.root.append(&row);
     }
 
     fn code_block(&mut self, lang: &str, code: &str) {
@@ -154,7 +202,7 @@ impl Renderer {
         self.root.append(&frame);
     }
 
-    fn event(&mut self, ev: Event) {
+    fn event(&mut self, ev: Event, range: std::ops::Range<usize>) {
         if let Some((_, code)) = &mut self.code {
             match ev {
                 Event::Text(t) => code.push_str(&t),
@@ -286,7 +334,7 @@ impl Renderer {
                 if self.markup.ends_with("•  ") {
                     self.markup.truncate(self.markup.len() - "•  ".len());
                 }
-                self.markup.push_str(if done { "☑  " } else { "☐  " });
+                self.task = Some((done, range.start));
             }
             Event::FootnoteReference(f) => self.push_text(&format!("[{f}]")),
             #[allow(unreachable_patterns)]
@@ -296,7 +344,7 @@ impl Renderer {
 }
 
 /// Fills `root` (cleared first) with widgets rendering `markdown`.
-pub fn render_into(root: &gtk::Box, markdown: &str, on_copy: CopyFn) {
+pub fn render_into(root: &gtk::Box, markdown: &str, on_copy: CopyFn, on_task: TaskFn) {
     while let Some(child) = root.first_child() {
         root.remove(&child);
     }
@@ -310,9 +358,11 @@ pub fn render_into(root: &gtk::Box, markdown: &str, on_copy: CopyFn) {
         in_table: false,
         table_cell: 0,
         on_copy,
+        on_task,
+        task: None,
     };
-    for ev in Parser::new_ext(markdown, opts) {
-        r.event(ev);
+    for (ev, range) in Parser::new_ext(markdown, opts).into_offset_iter() {
+        r.event(ev, range);
     }
     r.flush();
     if r.root.first_child().is_none() {
@@ -320,5 +370,32 @@ pub fn render_into(root: &gtk::Box, markdown: &str, on_copy: CopyFn) {
         empty.add_css_class("dim-label");
         empty.set_vexpand(true);
         root.append(&empty);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The offsets the renderer hands to the checkbox callback must point at "[ ]".
+    #[test]
+    fn task_marker_offsets_point_at_brackets() {
+        let md = "# To-dö\n\n- [ ] first\n- [x] ünïcode second\n  - [X] nested\n\n```\n- [ ] code\n```\n";
+        let opts = Options::ENABLE_TASKLISTS;
+        let offsets: Vec<(usize, bool)> = Parser::new_ext(md, opts)
+            .into_offset_iter()
+            .filter_map(|(ev, r)| match ev {
+                Event::TaskListMarker(done) => Some((r.start, done)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(offsets.len(), 3);
+        for (off, done) in offsets {
+            let ch = task_state_char_offset(md, off).expect("offset points at a checkbox");
+            let state = md.chars().nth(ch).unwrap();
+            assert_eq!(state != ' ', done);
+        }
+        assert_eq!(task_state_char_offset(md, 0), None);
+        assert_eq!(task_state_char_offset(md, md.len()), None);
     }
 }

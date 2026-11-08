@@ -2,6 +2,7 @@ mod autostart;
 mod db;
 mod list_window;
 mod markdown;
+mod migrate;
 mod model;
 mod note_window;
 mod state;
@@ -15,7 +16,7 @@ use std::rc::Rc;
 
 use state::AppState;
 
-pub const APP_ID: &str = "io.github.technophilix.DevNotes";
+pub const APP_ID: &str = "io.github.technophilix.DevSticky";
 
 const CSS: &str = r#"
 .color-dot { min-width: 12px; min-height: 12px; border-radius: 6px; }
@@ -39,6 +40,7 @@ textview.note-editor, textview.note-editor text { background-color: transparent;
 
 textview.code-view, textview.code-view text { background-color: transparent; }
 .md-quote { color: alpha(currentColor, 0.7); }
+.task-done { text-decoration-line: line-through; color: alpha(currentColor, 0.55); }
 "#;
 
 fn load_css() {
@@ -57,10 +59,19 @@ fn setup_actions(app: &adw::Application, state: &Rc<AppState>, panel: &list_wind
     let (a, s) = (app.downgrade(), state.clone());
     new_note.connect_activate(move |_, _| {
         if let Some(app) = a.upgrade() {
-            note_window::create(&app, &s, None);
+            note_window::create(&app, &s, None, "");
         }
     });
     app.add_action(&new_note);
+
+    let new_todo = gio::SimpleAction::new("new-todo", None);
+    let (a, s) = (app.downgrade(), state.clone());
+    new_todo.connect_activate(move |_, _| {
+        if let Some(app) = a.upgrade() {
+            note_window::create(&app, &s, None, model::TODO_TEMPLATE);
+        }
+    });
+    app.add_action(&new_todo);
 
     let show = gio::SimpleAction::new("show-notes", None);
     let p = panel.clone();
@@ -76,7 +87,7 @@ fn setup_actions(app: &adw::Application, state: &Rc<AppState>, panel: &list_wind
         let enable = !action.state().and_then(|v| v.get::<bool>()).unwrap_or(false);
         match autostart::set_enabled(enable) {
             Ok(()) => action.set_state(&enable.to_variant()),
-            Err(e) => eprintln!("devnotes: changing autostart failed: {e:#}"),
+            Err(e) => eprintln!("devsticky: changing autostart failed: {e:#}"),
         }
     });
     app.add_action(&autostart);
@@ -95,7 +106,7 @@ fn setup_actions(app: &adw::Application, state: &Rc<AppState>, panel: &list_wind
     let w = panel.window.downgrade();
     about.connect_activate(move |_, _| {
         let dialog = adw::AboutDialog::builder()
-            .application_name("DevNotes")
+            .application_name("DevSticky")
             .application_icon(APP_ID)
             .version(env!("CARGO_PKG_VERSION"))
             .comments("Sticky notes for developers: Markdown, code snippets, tags and search.")
@@ -119,6 +130,8 @@ fn setup_actions(app: &adw::Application, state: &Rc<AppState>, panel: &list_wind
     app.add_action(&quit);
 
     app.set_accels_for_action("app.new-note", &["<Ctrl>n"]);
+    app.set_accels_for_action("app.new-todo", &["<Ctrl><Shift>n"]);
+    app.set_accels_for_action("win.toggle-task", &["<Ctrl>t"]);
     app.set_accels_for_action("app.show-notes", &["<Ctrl>l"]);
     app.set_accels_for_action("app.quit", &["<Ctrl>q"]);
     app.set_accels_for_action("window.close", &["<Ctrl>w"]);
@@ -129,7 +142,7 @@ fn setup_actions(app: &adw::Application, state: &Rc<AppState>, panel: &list_wind
 
 fn json_filter() -> gio::ListStore {
     let filter = gtk::FileFilter::new();
-    filter.set_name(Some("DevNotes export (*.json)"));
+    filter.set_name(Some("DevSticky export (*.json)"));
     filter.add_pattern("*.json");
     let filters = gio::ListStore::new::<gtk::FileFilter>();
     filters.append(&filter);
@@ -168,7 +181,7 @@ fn export_notes(state: &Rc<AppState>, panel: &list_window::Panel) {
         match result {
             Ok(n) => panel.toast(&format!("Exported {n} notes")),
             Err(e) => {
-                eprintln!("devnotes: export failed: {e:#}");
+                eprintln!("devsticky: export failed: {e:#}");
                 panel.toast(&format!("Export failed: {e}"));
             }
         }
@@ -203,7 +216,7 @@ fn import_notes(state: &Rc<AppState>, panel: &list_window::Panel) {
                 panel.toast(&report.summary());
             }
             Err(e) => {
-                eprintln!("devnotes: import failed: {e:#}");
+                eprintln!("devsticky: import failed: {e:#}");
                 panel.toast(&format!("Import failed: {e}"));
             }
         }
@@ -228,7 +241,7 @@ fn start_tray(app: &adw::Application, state: &Rc<AppState>, panel: &list_window:
     let handle = match tray::spawn(tx) {
         Ok(h) => h,
         Err(e) => {
-            eprintln!("devnotes: top-bar icon unavailable ({e}); running as a normal window");
+            eprintln!("devsticky: top-bar icon unavailable ({e}); running as a normal window");
             return;
         }
     };
@@ -246,7 +259,10 @@ fn start_tray(app: &adw::Application, state: &Rc<AppState>, panel: &list_window:
                 tray::TrayEvent::Toggle(token) => panel.toggle(token.as_deref()),
                 tray::TrayEvent::Show(token) => panel.show(token.as_deref()),
                 tray::TrayEvent::NewNote(token) => {
-                    note_window::create(&app, &state, token.as_deref())
+                    note_window::create(&app, &state, token.as_deref(), "")
+                }
+                tray::TrayEvent::NewTodo(token) => {
+                    note_window::create(&app, &state, token.as_deref(), model::TODO_TEMPLATE)
                 }
                 tray::TrayEvent::Quit => app.activate_action("quit", None),
                 tray::TrayEvent::Gone => {
@@ -281,11 +297,13 @@ fn main() -> glib::ExitCode {
     let (p, sc) = (panel.clone(), state_cell.clone());
     app.connect_startup(move |app| {
         load_css();
-        let path = glib::user_data_dir().join("devnotes").join("notes.db");
+        let data_dir = glib::user_data_dir().join("devsticky");
+        migrate::run(&data_dir);
+        let path = data_dir.join("notes.db");
         let store = match db::Store::open(&path) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("devnotes: {e:#}");
+                eprintln!("devsticky: {e:#}");
                 std::process::exit(1);
             }
         };
@@ -306,9 +324,10 @@ fn main() -> glib::ExitCode {
     });
 
     // Runs in the primary instance for every launch, including later ones.
-    //   devnotes               show the notes panel
-    //   devnotes --new-note    create a note
-    //   devnotes --background  first launch only: start with just the top-bar icon
+    //   devsticky               show the notes panel
+    //   devsticky --new-note    create a note
+    //   devsticky --new-todo    create a to-do list
+    //   devsticky --background  first launch only: start with just the top-bar icon
     let first = std::cell::Cell::new(true);
     app.connect_command_line(move |app, cmd| {
         let args: Vec<String> = cmd
@@ -321,8 +340,10 @@ fn main() -> glib::ExitCode {
         let Some(state) = state_cell.borrow().clone() else {
             return glib::ExitCode::FAILURE;
         };
-        if args.iter().any(|a| a == "--new-note") {
-            note_window::create(app, &state, None);
+        if args.iter().any(|a| a == "--new-todo") {
+            note_window::create(app, &state, None, model::TODO_TEMPLATE);
+        } else if args.iter().any(|a| a == "--new-note") {
+            note_window::create(app, &state, None, "");
         } else if !(is_first && args.iter().any(|a| a == "--background") && state.tray_active.get())
             && let Some(p) = panel.borrow().as_ref()
         {

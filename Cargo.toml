@@ -1,7 +1,11 @@
 [package]
-name = "devnotes"
+name = "devsticky"
 version = "0.1.0"
 edition = "2024"
+description = "Sticky notes for developers: Markdown, code snippets, tags and search"
+license = "MIT"
+authors = ["technophilix"]
+readme = "README.md"
 
 [dependencies]
 adw = { version = "0.9.2", package = "libadwaita", features = ["v1_5"] }
@@ -16,3 +20,60 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sourceview5 = { version = "0.11.2", features = ["v5_10"] }
 uuid = { version = "1.29.1", features = ["v4"] }
+
+[profile.release]
+lto = "thin"
+strip = true
+
+# Debian / Ubuntu package:  cargo deb
+[package.metadata.deb]
+maintainer = "technophilix"
+copyright = "2026, technophilix"
+section = "utils"
+priority = "optional"
+extended-description = """\
+DevSticky keeps code snippets, commands and to-dos one click away in the top bar: \
+Markdown notes with syntax-highlighted code blocks, tags, instant search, \
+and offline export/import."""
+# Library versions are worked out from the binary by dpkg-shlibdeps.
+depends = "$auto"
+assets = [
+    ["target/release/devsticky", "usr/bin/", "755"],
+    ["data/io.github.technophilix.DevSticky.desktop", "usr/share/applications/", "644"],
+    ["data/io.github.technophilix.DevSticky.metainfo.xml", "usr/share/metainfo/", "644"],
+    ["data/icons/hicolor/16x16/apps/io.github.technophilix.DevSticky.png", "usr/share/icons/hicolor/16x16/apps/", "644"],
+    ["data/icons/hicolor/22x22/apps/io.github.technophilix.DevSticky.png", "usr/share/icons/hicolor/22x22/apps/", "644"],
+    ["data/icons/hicolor/24x24/apps/io.github.technophilix.DevSticky.png", "usr/share/icons/hicolor/24x24/apps/", "644"],
+    ["data/icons/hicolor/32x32/apps/io.github.technophilix.DevSticky.png", "usr/share/icons/hicolor/32x32/apps/", "644"],
+    ["data/icons/hicolor/48x48/apps/io.github.technophilix.DevSticky.png", "usr/share/icons/hicolor/48x48/apps/", "644"],
+    ["data/icons/hicolor/64x64/apps/io.github.technophilix.DevSticky.png", "usr/share/icons/hicolor/64x64/apps/", "644"],
+    ["data/icons/hicolor/128x128/apps/io.github.technophilix.DevSticky.png", "usr/share/icons/hicolor/128x128/apps/", "644"],
+    ["data/icons/hicolor/256x256/apps/io.github.technophilix.DevSticky.png", "usr/share/icons/hicolor/256x256/apps/", "644"],
+    ["data/icons/hicolor/512x512/apps/io.github.technophilix.DevSticky.png", "usr/share/icons/hicolor/512x512/apps/", "644"],
+    ["README.md", "usr/share/doc/devsticky/README.md", "644"],
+]
+
+# Fedora / openSUSE package:  cargo generate-rpm
+[package.metadata.generate-rpm]
+summary = "Sticky notes for developers"
+assets = [
+    { source = "target/release/devsticky", dest = "/usr/bin/devsticky", mode = "755" },
+    { source = "data/io.github.technophilix.DevSticky.desktop", dest = "/usr/share/applications/io.github.technophilix.DevSticky.desktop", mode = "644" },
+    { source = "data/io.github.technophilix.DevSticky.metainfo.xml", dest = "/usr/share/metainfo/io.github.technophilix.DevSticky.metainfo.xml", mode = "644" },
+    { source = "data/icons/hicolor/16x16/apps/io.github.technophilix.DevSticky.png", dest = "/usr/share/icons/hicolor/16x16/apps/io.github.technophilix.DevSticky.png", mode = "644" },
+    { source = "data/icons/hicolor/22x22/apps/io.github.technophilix.DevSticky.png", dest = "/usr/share/icons/hicolor/22x22/apps/io.github.technophilix.DevSticky.png", mode = "644" },
+    { source = "data/icons/hicolor/24x24/apps/io.github.technophilix.DevSticky.png", dest = "/usr/share/icons/hicolor/24x24/apps/io.github.technophilix.DevSticky.png", mode = "644" },
+    { source = "data/icons/hicolor/32x32/apps/io.github.technophilix.DevSticky.png", dest = "/usr/share/icons/hicolor/32x32/apps/io.github.technophilix.DevSticky.png", mode = "644" },
+    { source = "data/icons/hicolor/48x48/apps/io.github.technophilix.DevSticky.png", dest = "/usr/share/icons/hicolor/48x48/apps/io.github.technophilix.DevSticky.png", mode = "644" },
+    { source = "data/icons/hicolor/64x64/apps/io.github.technophilix.DevSticky.png", dest = "/usr/share/icons/hicolor/64x64/apps/io.github.technophilix.DevSticky.png", mode = "644" },
+    { source = "data/icons/hicolor/128x128/apps/io.github.technophilix.DevSticky.png", dest = "/usr/share/icons/hicolor/128x128/apps/io.github.technophilix.DevSticky.png", mode = "644" },
+    { source = "data/icons/hicolor/256x256/apps/io.github.technophilix.DevSticky.png", dest = "/usr/share/icons/hicolor/256x256/apps/io.github.technophilix.DevSticky.png", mode = "644" },
+    { source = "data/icons/hicolor/512x512/apps/io.github.technophilix.DevSticky.png", dest = "/usr/share/icons/hicolor/512x512/apps/io.github.technophilix.DevSticky.png", mode = "644" },
+    { source = "LICENSE", dest = "/usr/share/licenses/devsticky/LICENSE", mode = "644", doc = true },
+    { source = "README.md", dest = "/usr/share/doc/devsticky/README.md", mode = "644", doc = true },
+]
+
+[package.metadata.generate-rpm.requires]
+gtk4 = ">= 4.14"
+libadwaita = ">= 1.5"
+gtksourceview5 = ">= 5.10"

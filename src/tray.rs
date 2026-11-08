@@ -15,6 +15,7 @@ pub enum TrayEvent {
     Toggle(Option<String>),
     Show(Option<String>),
     NewNote(Option<String>),
+    NewTodo(Option<String>),
     Quit,
     /// The desktop no longer shows tray icons.
     Gone,
@@ -22,12 +23,12 @@ pub enum TrayEvent {
     Back,
 }
 
-struct DevNotesTray {
+struct DevStickyTray {
     tx: async_channel::Sender<TrayEvent>,
     icon: Vec<ksni::Icon>,
 }
 
-impl DevNotesTray {
+impl DevStickyTray {
     fn send(&self, make: impl FnOnce(Option<String>) -> TrayEvent) {
         let _ = self.tx.send_blocking(make(activation_token()));
     }
@@ -44,18 +45,18 @@ fn activation_token() -> Option<String> {
     None
 }
 
-impl ksni::Tray for DevNotesTray {
+impl ksni::Tray for DevStickyTray {
     fn id(&self) -> String {
-        "devnotes".into()
+        "devsticky".into()
     }
 
     fn title(&self) -> String {
-        "DevNotes".into()
+        "DevSticky".into()
     }
 
     fn tool_tip(&self) -> ksni::ToolTip {
         ksni::ToolTip {
-            title: "DevNotes".into(),
+            title: "DevSticky".into(),
             description: "Click to search your notes".into(),
             ..Default::default()
         }
@@ -85,9 +86,16 @@ impl ksni::Tray for DevNotesTray {
                 ..Default::default()
             }
             .into(),
+            StandardItem {
+                label: "New To-do List".into(),
+                icon_name: "object-select-symbolic".into(),
+                activate: Box::new(|t: &mut Self| t.send(TrayEvent::NewTodo)),
+                ..Default::default()
+            }
+            .into(),
             ksni::MenuItem::Separator,
             StandardItem {
-                label: "Quit DevNotes".into(),
+                label: "Quit DevSticky".into(),
                 icon_name: "application-exit-symbolic".into(),
                 activate: Box::new(|t: &mut Self| {
                     let _ = t.tx.send_blocking(TrayEvent::Quit);
@@ -110,12 +118,12 @@ impl ksni::Tray for DevNotesTray {
 }
 
 pub struct TrayHandle {
-    _handle: ksni::blocking::Handle<DevNotesTray>,
+    _handle: ksni::blocking::Handle<DevStickyTray>,
 }
 
 /// Starts the tray icon. Fails if the desktop has no tray (StatusNotifierHost).
 pub fn spawn(tx: async_channel::Sender<TrayEvent>) -> Result<TrayHandle, ksni::Error> {
-    let tray = DevNotesTray {
+    let tray = DevStickyTray {
         tx,
         icon: logo_icons(),
     };
@@ -126,9 +134,9 @@ pub fn spawn(tx: async_channel::Sender<TrayEvent>) -> Result<TrayHandle, ksni::E
 
 /// The app logo at the sizes tray hosts typically ask for, embedded in the binary.
 const ICON_PNGS: &[&[u8]] = &[
-    include_bytes!("../data/icons/hicolor/22x22/apps/io.github.technophilix.DevNotes.png"),
-    include_bytes!("../data/icons/hicolor/32x32/apps/io.github.technophilix.DevNotes.png"),
-    include_bytes!("../data/icons/hicolor/64x64/apps/io.github.technophilix.DevNotes.png"),
+    include_bytes!("../data/icons/hicolor/22x22/apps/io.github.technophilix.DevSticky.png"),
+    include_bytes!("../data/icons/hicolor/32x32/apps/io.github.technophilix.DevSticky.png"),
+    include_bytes!("../data/icons/hicolor/64x64/apps/io.github.technophilix.DevSticky.png"),
 ];
 
 /// Decodes the embedded logo PNGs into ARGB32 (network byte order), which is
