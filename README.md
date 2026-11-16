@@ -36,7 +36,7 @@ Download the package for your distro from the Releases page, then:
 
 Older releases (e.g. Debian 12, Ubuntu 22.04) ship GTK/libadwaita versions that are too old.
 
-**macOS 14+ (Apple Silicon):** open `DevSticky-<version>-arm64.dmg` and drag DevSticky
+**macOS 15+ (Apple Silicon):** open `DevSticky-<version>-arm64.dmg` and drag DevSticky
 into Applications. The app is not notarized by Apple, so the first time,
 right-click it and choose **Open** (or run
 `xattr -dr com.apple.quarantine /Applications/DevSticky.app`). DevSticky lives in
