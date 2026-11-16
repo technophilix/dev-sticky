@@ -486,13 +486,13 @@ fn build(
     header.pack_start(
         &gtk::Button::builder()
             .icon_name("object-select-symbolic")
-            .tooltip_text("Checkbox: add or tick (Ctrl+T)")
+            .tooltip_text(format!("Checkbox: add or tick ({}T)", crate::PRIMARY))
             .action_name("win.toggle-task")
             .build(),
     );
     let copy_btn = gtk::Button::builder()
         .icon_name("edit-copy-symbolic")
-        .tooltip_text("Copy Note (Ctrl+Shift+C)")
+        .tooltip_text(format!("Copy Note ({}{}C)", crate::PRIMARY, crate::SHIFT))
         .action_name("win.copy-all")
         .build();
     header.pack_end(&copy_btn);
@@ -545,6 +545,7 @@ fn build(
         let plain = !mods.intersects(
             gtk::gdk::ModifierType::SHIFT_MASK
                 | gtk::gdk::ModifierType::CONTROL_MASK
+                | gtk::gdk::ModifierType::META_MASK
                 | gtk::gdk::ModifierType::ALT_MASK,
         );
         if plain

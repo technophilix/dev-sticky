@@ -1,12 +1,18 @@
 mod autostart;
 mod db;
 mod list_window;
+#[cfg(target_os = "macos")]
+mod macos_bundle;
 mod markdown;
 mod migrate;
 mod model;
 mod note_window;
 mod state;
 mod transfer;
+#[cfg(target_os = "linux")]
+mod tray;
+#[cfg(target_os = "macos")]
+#[path = "tray_macos.rs"]
 mod tray;
 
 use adw::prelude::*;
@@ -17,6 +23,11 @@ use std::rc::Rc;
 use state::AppState;
 
 pub const APP_ID: &str = "io.github.technophilix.DevSticky";
+
+/// How the primary shortcut modifier is written in tooltips: ⌘ on macOS, Ctrl elsewhere.
+pub const PRIMARY: &str = if cfg!(target_os = "macos") { "⌘" } else { "Ctrl+" };
+/// Shift as written after [`PRIMARY`].
+pub const SHIFT: &str = if cfg!(target_os = "macos") { "⇧" } else { "Shift+" };
 
 const CSS: &str = r#"
 .color-dot { min-width: 12px; min-height: 12px; border-radius: 6px; }
@@ -129,15 +140,15 @@ fn setup_actions(app: &adw::Application, state: &Rc<AppState>, panel: &list_wind
     });
     app.add_action(&quit);
 
-    app.set_accels_for_action("app.new-note", &["<Ctrl>n"]);
-    app.set_accels_for_action("app.new-todo", &["<Ctrl><Shift>n"]);
-    app.set_accels_for_action("win.toggle-task", &["<Ctrl>t"]);
-    app.set_accels_for_action("app.show-notes", &["<Ctrl>l"]);
-    app.set_accels_for_action("app.quit", &["<Ctrl>q"]);
-    app.set_accels_for_action("window.close", &["<Ctrl>w"]);
-    app.set_accels_for_action("win.focus-search", &["<Ctrl>f"]);
-    app.set_accels_for_action("win.toggle-preview", &["<Ctrl>e"]);
-    app.set_accels_for_action("win.copy-all", &["<Ctrl><Shift>c"]);
+    app.set_accels_for_action("app.new-note", &["<Primary>n"]);
+    app.set_accels_for_action("app.new-todo", &["<Primary><Shift>n"]);
+    app.set_accels_for_action("win.toggle-task", &["<Primary>t"]);
+    app.set_accels_for_action("app.show-notes", &["<Primary>l"]);
+    app.set_accels_for_action("app.quit", &["<Primary>q"]);
+    app.set_accels_for_action("window.close", &["<Primary>w"]);
+    app.set_accels_for_action("win.focus-search", &["<Primary>f"]);
+    app.set_accels_for_action("win.toggle-preview", &["<Primary>e"]);
+    app.set_accels_for_action("win.copy-all", &["<Primary><Shift>c"]);
 }
 
 fn json_filter() -> gio::ListStore {
@@ -236,6 +247,7 @@ pub fn quit_if_no_visible_windows(app: &gtk::Application, state: &Rc<AppState>) 
 }
 
 /// Starts the top-bar icon and handles its clicks on the GTK main loop.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn start_tray(app: &adw::Application, state: &Rc<AppState>, panel: &list_window::Panel) {
     let (tx, rx) = async_channel::unbounded();
     let handle = match tray::spawn(tx) {
@@ -284,7 +296,14 @@ fn start_tray(app: &adw::Application, state: &Rc<AppState>, panel: &list_window:
     });
 }
 
+/// No top-bar icon on this platform yet: DevSticky runs as a normal window app.
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn start_tray(_app: &adw::Application, _state: &Rc<AppState>, _panel: &list_window::Panel) {}
+
 fn main() -> glib::ExitCode {
+    #[cfg(target_os = "macos")]
+    macos_bundle::setup_env();
+
     let app = adw::Application::builder()
         .application_id(APP_ID)
         // Arguments are forwarded to the already-running instance, if any.
