@@ -1,9 +1,10 @@
-# Builds the .deb and .rpm packages. Runs on every push to main (packages are
+# Builds the .deb and .rpm packages and the macOS .dmg. Runs on every push to main (packages are
 # attached to the workflow run) and publishes a GitHub Release for tags "v*".
 #
 # Packages are built on the oldest supported distros so they also install on
 # newer ones: the .deb on Ubuntu 24.04 (works on Debian 13+, Ubuntu 24.04+, Mint 22+),
-# the .rpm on Fedora 41 (works on Fedora 41+ and similar).
+# the .rpm on Fedora 41 (works on Fedora 41+ and similar), the .dmg on macOS 14
+# Apple Silicon (works on macOS 14+).
 name: Packages
 
 on:
@@ -60,9 +61,27 @@ jobs:
           name: rpm
           path: target/generate-rpm/*.rpm
 
+  macos:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: brew install gtk4 libadwaita gtksourceview5 adwaita-icon-theme librsvg dylibbundler pkg-config
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - name: Test and build .dmg
+        run: |
+          cargo test --locked
+          ./scripts/package-macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dmg
+          path: dist/*.dmg
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [deb, rpm]
+    needs: [deb, rpm, macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write

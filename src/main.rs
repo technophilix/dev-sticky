@@ -1,6 +1,8 @@
 mod autostart;
 mod db;
 mod list_window;
+#[cfg(target_os = "macos")]
+mod macos_bundle;
 mod markdown;
 mod migrate;
 mod model;
@@ -299,6 +301,9 @@ fn start_tray(app: &adw::Application, state: &Rc<AppState>, panel: &list_window:
 fn start_tray(_app: &adw::Application, _state: &Rc<AppState>, _panel: &list_window::Panel) {}
 
 fn main() -> glib::ExitCode {
+    #[cfg(target_os = "macos")]
+    macos_bundle::setup_env();
+
     let app = adw::Application::builder()
         .application_id(APP_ID)
         // Arguments are forwarded to the already-running instance, if any.

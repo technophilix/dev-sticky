@@ -36,6 +36,12 @@ Download the package for your distro from the Releases page, then:
 
 Older releases (e.g. Debian 12, Ubuntu 22.04) ship GTK/libadwaita versions that are too old.
 
+**macOS 14+ (Apple Silicon):** open `DevSticky-<version>-arm64.dmg` and drag DevSticky
+into Applications. The app is not notarized by Apple, so the first time,
+right-click it and choose **Open** (or run
+`xattr -dr com.apple.quarantine /Applications/DevSticky.app`). DevSticky lives in
+the menu bar and has no Dock icon.
+
 ## Build from source
 
 ```sh
@@ -47,6 +53,8 @@ sudo apt install libgtk-4-dev libadwaita-1-dev libgtksourceview-5-dev build-esse
 cargo run --release        # just try it
 ./scripts/install.sh       # install for your user into ~/.local (no sudo)
 ./scripts/package.sh       # build .deb and .rpm into dist/
+./scripts/package-macos.sh # macOS: build DevSticky.app and a .dmg into dist/
+                           #   (also needs: brew install librsvg dylibbundler)
 ```
 
 ## Uninstall
