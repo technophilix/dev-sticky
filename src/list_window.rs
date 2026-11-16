@@ -75,7 +75,7 @@ impl NoteList {
             self.empty_page.set_icon_name(Some("document-edit-symbolic"));
             self.empty_page.set_title("No Notes Yet");
             self.empty_page
-                .set_description(Some("Press Ctrl+N or the + button to create one."));
+                .set_description(Some(&format!("Press {}N or the + button to create one.", crate::PRIMARY)));
         } else {
             self.empty_page.set_icon_name(Some("edit-find-symbolic"));
             self.empty_page.set_title("No Results");
@@ -308,8 +308,8 @@ pub fn build(app: &adw::Application, state: &Rc<AppState>) -> Panel {
     new_menu.append(Some("New To-do List"), Some("app.new-todo"));
     let new_btn = adw::SplitButton::builder()
         .icon_name("list-add-symbolic")
-        .tooltip_text("New Note (Ctrl+N)")
-        .dropdown_tooltip("More: New To-do List (Ctrl+Shift+N)")
+        .tooltip_text(format!("New Note ({}N)", crate::PRIMARY))
+        .dropdown_tooltip(format!("More: New To-do List ({}{}N)", crate::PRIMARY, crate::SHIFT))
         .action_name("app.new-note")
         .menu_model(&new_menu)
         .build();

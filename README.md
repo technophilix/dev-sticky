@@ -1,6 +1,6 @@
 # DevSticky
 
-Sticky notes for developers on Linux, built with Rust, GTK4 and libadwaita.
+Sticky notes for developers on Linux and macOS, built with Rust, GTK4 and libadwaita.
 
 - Markdown notes with syntax-highlighted code blocks and a copy button on each
 - Tags and fast full-text search (`docker`, `#bug`, `auth #backend`)
@@ -42,6 +42,8 @@ Older releases (e.g. Debian 12, Ubuntu 22.04) ship GTK/libadwaita versions that 
 sudo apt install libgtk-4-dev libadwaita-1-dev libgtksourceview-5-dev build-essential pkg-config
 # Fedora: sudo dnf install gcc gtk4-devel libadwaita-devel gtksourceview5-devel
 
+# macOS:  brew install gtk4 libadwaita gtksourceview5 adwaita-icon-theme pkg-config
+
 cargo run --release        # just try it
 ./scripts/install.sh       # install for your user into ~/.local (no sudo)
 ./scripts/package.sh       # build .deb and .rpm into dist/
@@ -67,6 +69,10 @@ The top-bar icon uses the StatusNotifierItem protocol: it works out of the box o
 Ubuntu (AppIndicator extension), KDE, XFCE, Cinnamon and waybar. On stock GNOME,
 install the "AppIndicator and KStatusNotifierItem Support" extension. Without a
 tray, DevSticky runs as a normal window app.
+
+On macOS the icon sits in the menu bar: left click opens the quick panel,
+right click shows the menu. Shortcuts use ⌘ instead of Ctrl, and Start at Login
+adds a LaunchAgent in `~/Library/LaunchAgents`.
 
 ### Command line
 
