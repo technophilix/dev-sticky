@@ -635,6 +635,7 @@ fn open_note(
             win.set_startup_id(t);
         }
         win.present();
+        crate::bring_to_front();
     };
     if let Some(win) = state.note_window(id) {
         present(&win);

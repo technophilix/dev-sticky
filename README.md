@@ -10,6 +10,8 @@ Sticky notes for developers on Linux and macOS, built with Rust, GTK4 and libadw
 - Note colors, pinning, autosave
 - Top-bar icon: click to open a quick search panel, click again (or Esc) to hide
 - Fully offline. Move notes between machines with Export / Import (main menu)
+- **Check for Updates…** (main menu or top-bar menu) looks up the latest GitHub release;
+  it is the only time DevSticky goes online, and only when you click it
 
 Notes are stored in `~/.local/share/devsticky/notes.db` (SQLite).
 

@@ -14,6 +14,7 @@ pub enum TrayEvent {
     /// Left click: show the quick panel, or hide it if it is focused.
     Toggle(Option<String>),
     Show(Option<String>),
+    CheckUpdates,
     NewNote(Option<String>),
     NewTodo(Option<String>),
     Quit,
@@ -94,6 +95,15 @@ impl ksni::Tray for DevStickyTray {
             }
             .into(),
             ksni::MenuItem::Separator,
+            StandardItem {
+                label: "Check for Updates…".into(),
+                icon_name: "software-update-available-symbolic".into(),
+                activate: Box::new(|t: &mut Self| {
+                    let _ = t.tx.send_blocking(TrayEvent::CheckUpdates);
+                }),
+                ..Default::default()
+            }
+            .into(),
             StandardItem {
                 label: "Quit".into(),
                 icon_name: "application-exit-symbolic".into(),

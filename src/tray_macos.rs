@@ -16,6 +16,7 @@ use tray_icon::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIc
 pub enum TrayEvent {
     Toggle(Option<String>),
     Show(Option<String>),
+    CheckUpdates,
     NewNote(Option<String>),
     NewTodo(Option<String>),
     Quit,
@@ -34,12 +35,14 @@ pub fn spawn(tx: async_channel::Sender<TrayEvent>) -> anyhow::Result<TrayHandle>
     let search = MenuItem::new("Search Notes", true, None);
     let new_note = MenuItem::new("New Note", true, None);
     let new_todo = MenuItem::new("New To-do List", true, None);
+    let updates = MenuItem::new("Check for Updates…", true, None);
     let quit = MenuItem::new("Quit DevSticky", true, None);
     let menu = Menu::with_items(&[
         &search,
         &new_note,
         &new_todo,
         &PredefinedMenuItem::separator(),
+        &updates,
         &quit,
     ])?;
 
@@ -49,10 +52,13 @@ pub fn spawn(tx: async_channel::Sender<TrayEvent>) -> anyhow::Result<TrayHandle>
         (new_todo.id().clone(), TrayEvent::NewTodo),
     ];
     let quit_id = quit.id().clone();
+    let updates_id = updates.id().clone();
     let menu_tx = tx.clone();
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
         let msg = if event.id == quit_id {
             TrayEvent::Quit
+        } else if event.id == updates_id {
+            TrayEvent::CheckUpdates
         } else if let Some((_, make)) = ids.iter().find(|(id, _)| *id == event.id) {
             make(None)
         } else {

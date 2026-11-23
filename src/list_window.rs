@@ -241,6 +241,9 @@ pub struct Panel {
     pub window: adw::ApplicationWindow,
     search: gtk::SearchEntry,
     toasts: adw::ToastOverlay,
+    /// When the panel last lost focus (see [`Panel::toggle`]).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    last_focused: Rc<Cell<Option<std::time::Instant>>>,
 }
 
 impl Panel {
@@ -251,18 +254,41 @@ impl Panel {
             self.window.set_startup_id(t);
         }
         self.window.present();
+        crate::bring_to_front();
         self.search.grab_focus();
         self.search.select_region(0, -1);
     }
 
-    /// Tray click: hide if shown, otherwise show. (Not based on focus: clicking the
-    /// top bar can itself make the window inactive, so a second click would never hide.)
     pub fn toast(&self, msg: &str) {
         self.toasts.add_toast(adw::Toast::new(msg));
     }
 
+    pub fn add_toast(&self, toast: &adw::Toast) {
+        self.toasts.add_toast(toast.clone());
+    }
+
+    /// Tray click: hide if shown, otherwise show. (Not based on focus: clicking the
+    /// top bar can itself make the window inactive, so a second click would never hide.)
+    #[cfg(not(target_os = "macos"))]
     pub fn toggle(&self, token: Option<&str>) {
         if self.window.is_visible() {
+            self.window.set_visible(false);
+        } else {
+            self.show(token);
+        }
+    }
+
+    /// Menu-bar click: hide the panel if it is in front, otherwise bring it
+    /// forward. A panel left open behind other apps comes to the front instead
+    /// of disappearing. Focus lost a moment ago still counts as "in front", in
+    /// case the click on the menu bar itself took the focus.
+    #[cfg(target_os = "macos")]
+    pub fn toggle(&self, token: Option<&str>) {
+        let just_focused = self
+            .last_focused
+            .get()
+            .is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(400));
+        if self.window.is_visible() && (self.window.is_active() || just_focused) {
             self.window.set_visible(false);
         } else {
             self.show(token);
@@ -321,6 +347,7 @@ pub fn build(app: &adw::Application, state: &Rc<AppState>) -> Panel {
     menu.append_section(None, &data);
     let app_section = gio::Menu::new();
     app_section.append(Some("Start at Login"), Some("app.autostart"));
+    app_section.append(Some("Check for Updates…"), Some("app.check-updates"));
     app_section.append(Some("About DevSticky"), Some("app.about"));
     app_section.append(Some("Quit"), Some("app.quit"));
     menu.append_section(None, &app_section);
@@ -479,9 +506,18 @@ pub fn build(app: &adw::Application, state: &Rc<AppState>) -> Panel {
         let _owner = &list;
     });
 
+    let last_focused: Rc<Cell<Option<std::time::Instant>>> = Rc::default();
+    let lf = last_focused.clone();
+    window.connect_is_active_notify(move |w| {
+        if !w.is_active() {
+            lf.set(Some(std::time::Instant::now()));
+        }
+    });
+
     Panel {
         window,
         search,
         toasts,
+        last_focused,
     }
 }

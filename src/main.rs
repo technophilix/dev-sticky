@@ -2,11 +2,15 @@ mod autostart;
 mod db;
 mod list_window;
 #[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "macos")]
 mod macos_bundle;
 mod markdown;
 mod migrate;
 mod model;
 mod note_window;
+#[cfg(target_os = "macos")]
+mod single_instance;
 mod state;
 mod transfer;
 #[cfg(target_os = "linux")]
@@ -14,6 +18,7 @@ mod tray;
 #[cfg(target_os = "macos")]
 #[path = "tray_macos.rs"]
 mod tray;
+mod updates;
 
 use adw::prelude::*;
 use gtk::{gio, glib};
@@ -112,6 +117,11 @@ fn setup_actions(app: &adw::Application, state: &Rc<AppState>, panel: &list_wind
     let (s, p) = (state.clone(), panel.clone());
     import.connect_activate(move |_, _| import_notes(&s, &p));
     app.add_action(&import);
+
+    let check_updates = gio::SimpleAction::new("check-updates", None);
+    let p = panel.clone();
+    check_updates.connect_activate(move |action, _| check_for_updates(action, &p));
+    app.add_action(&check_updates);
 
     let about = gio::SimpleAction::new("about", None);
     let w = panel.window.downgrade();
@@ -234,14 +244,79 @@ fn import_notes(state: &Rc<AppState>, panel: &list_window::Panel) {
     });
 }
 
+/// Asks GitHub for the latest release and tells the user what it found.
+fn check_for_updates(action: &gio::SimpleAction, panel: &list_window::Panel) {
+    panel.show(None);
+    // One check at a time.
+    action.set_enabled(false);
+    let checking = adw::Toast::builder().title("Checking for updates…").timeout(0).build();
+    panel.add_toast(&checking);
+    let (action, panel) = (action.clone(), panel.clone());
+    glib::spawn_future_local(async move {
+        let result = gio::spawn_blocking(updates::fetch_latest)
+            .await
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("the update check crashed")));
+        checking.dismiss();
+        action.set_enabled(true);
+        match result {
+            Ok(release) if release.is_newer_than_running() => offer_update(&panel, &release),
+            Ok(_) => panel.toast(&format!("DevSticky {} is up to date", updates::CURRENT_VERSION)),
+            Err(e) => {
+                eprintln!("devsticky: checking for updates failed: {e:#}");
+                panel.toast("Couldn't check for updates. Are you online?");
+            }
+        }
+    });
+}
+
+fn offer_update(panel: &list_window::Panel, release: &updates::Release) {
+    let dialog = adw::AlertDialog::builder()
+        .heading("Update Available")
+        .body(format!(
+            "DevSticky {} is available. You have {}.\n\nDownload the new version from the release page and install it over this one; your notes are kept.",
+            release.version,
+            updates::CURRENT_VERSION
+        ))
+        .close_response("later")
+        .default_response("download")
+        .build();
+    dialog.add_responses(&[("later", "Later"), ("download", "Download")]);
+    dialog.set_response_appearance("download", adw::ResponseAppearance::Suggested);
+    let (url, window) = (release.url.clone(), panel.window.clone());
+    dialog.connect_response(None, move |_, response| {
+        if response == "download" {
+            gtk::UriLauncher::new(&url).launch(Some(&window), gio::Cancellable::NONE, |res| {
+                if let Err(e) = res {
+                    eprintln!("devsticky: opening the release page failed: {e}");
+                }
+            });
+        }
+    });
+    dialog.present(Some(&panel.window));
+}
+
+/// Makes the app active so a window shown from the top bar gets focus at once.
+/// Wayland/X11 use the activation token passed to `present` instead.
+pub fn bring_to_front() {
+    #[cfg(target_os = "macos")]
+    macos::activate();
+}
+
 /// Without a tray icon, quits once every window has been closed or hidden.
 /// With one, the app keeps running in the top bar.
 pub fn quit_if_no_visible_windows(app: &gtk::Application, state: &Rc<AppState>) {
     let app = app.clone();
     let state = state.clone();
     glib::idle_add_local_once(move || {
-        if !state.tray_active.get() && !app.windows().iter().any(|w| w.is_visible()) {
+        if app.windows().iter().any(|w| w.is_visible()) {
+            return;
+        }
+        if !state.tray_active.get() {
             app.quit();
+        } else {
+            // Nothing left on screen: give focus back to the previous app.
+            #[cfg(target_os = "macos")]
+            macos::deactivate();
         }
     });
 }
@@ -270,6 +345,7 @@ fn start_tray(app: &adw::Application, state: &Rc<AppState>, panel: &list_window:
             match event {
                 tray::TrayEvent::Toggle(token) => panel.toggle(token.as_deref()),
                 tray::TrayEvent::Show(token) => panel.show(token.as_deref()),
+                tray::TrayEvent::CheckUpdates => app.activate_action("check-updates", None),
                 tray::TrayEvent::NewNote(token) => {
                     note_window::create(&app, &state, token.as_deref(), "")
                 }
@@ -300,9 +376,44 @@ fn start_tray(app: &adw::Application, state: &Rc<AppState>, panel: &list_window:
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
 fn start_tray(_app: &adw::Application, _state: &Rc<AppState>, _panel: &list_window::Panel) {}
 
+/// Handles a launch's arguments in the running copy:
+///   devsticky               show the notes panel
+///   devsticky --new-note    create a note
+///   devsticky --new-todo    create a to-do list
+///   devsticky --background  first launch only: start with just the top-bar icon
+fn handle_launch(
+    app: &adw::Application,
+    state: &Rc<AppState>,
+    panel: &list_window::Panel,
+    args: &[String],
+    is_first: bool,
+) {
+    if args.iter().any(|a| a == "--new-todo") {
+        note_window::create(app, state, None, model::TODO_TEMPLATE);
+    } else if args.iter().any(|a| a == "--new-note") {
+        note_window::create(app, state, None, "");
+    } else if !(is_first && args.iter().any(|a| a == "--background") && state.tray_active.get()) {
+        panel.show(None);
+    }
+}
+
 fn main() -> glib::ExitCode {
     #[cfg(target_os = "macos")]
     macos_bundle::setup_env();
+
+    // macOS has no D-Bus, so GApplication can't keep the app unique there.
+    #[cfg(target_os = "macos")]
+    let instance = {
+        let args: Vec<String> = std::env::args().skip(1).collect();
+        if args.iter().any(|a| a.starts_with("--gapplication-app-id")) {
+            None // a separate test copy
+        } else {
+            match single_instance::claim(&args) {
+                Some(single_instance::Instance::Secondary) => return glib::ExitCode::SUCCESS,
+                other => other,
+            }
+        }
+    };
 
     let app = adw::Application::builder()
         .application_id(APP_ID)
@@ -338,16 +449,26 @@ fn main() -> glib::ExitCode {
             }
         });
         start_tray(app, &state, &list);
+        #[cfg(target_os = "macos")]
+        {
+            macos::hide_from_dock();
+            if let Some(single_instance::Instance::Primary { launches, .. }) = &instance {
+                let (app, state, list, launches) =
+                    (app.clone(), state.clone(), list.clone(), launches.clone());
+                glib::spawn_future_local(async move {
+                    while let Ok(args) = launches.recv().await {
+                        handle_launch(&app, &state, &list, &args, false);
+                    }
+                });
+            }
+        }
         *p.borrow_mut() = Some(list);
         *sc.borrow_mut() = Some(state);
     });
 
     // Runs in the primary instance for every launch, including later ones.
-    //   devsticky               show the notes panel
-    //   devsticky --new-note    create a note
-    //   devsticky --new-todo    create a to-do list
-    //   devsticky --background  first launch only: start with just the top-bar icon
     let first = std::cell::Cell::new(true);
+    let p = panel.clone();
     app.connect_command_line(move |app, cmd| {
         let args: Vec<String> = cmd
             .arguments()
@@ -359,16 +480,17 @@ fn main() -> glib::ExitCode {
         let Some(state) = state_cell.borrow().clone() else {
             return glib::ExitCode::FAILURE;
         };
-        if args.iter().any(|a| a == "--new-todo") {
-            note_window::create(app, &state, None, model::TODO_TEMPLATE);
-        } else if args.iter().any(|a| a == "--new-note") {
-            note_window::create(app, &state, None, "");
-        } else if !(is_first && args.iter().any(|a| a == "--background") && state.tray_active.get())
-            && let Some(p) = panel.borrow().as_ref()
-        {
-            p.show(None);
+        if let Some(p) = p.borrow().as_ref() {
+            handle_launch(app, &state, p, &args, is_first);
         }
         glib::ExitCode::SUCCESS
+    });
+
+    // macOS: opening DevSticky.app while it is already running ("reopen") ends up here.
+    app.connect_activate(move |_| {
+        if let Some(p) = panel.borrow().as_ref() {
+            p.show(None);
+        }
     });
 
     app.run()
