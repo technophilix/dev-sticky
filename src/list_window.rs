@@ -260,10 +260,16 @@ impl Panel {
     }
 
     pub fn toast(&self, msg: &str) {
-        self.toasts.add_toast(adw::Toast::new(msg));
+        self.add_toast(&adw::Toast::new(msg));
     }
 
     pub fn add_toast(&self, toast: &adw::Toast) {
+        let content = self.toasts.downgrade();
+        toast.connect_dismissed(move |_| {
+            if let Some(c) = content.upgrade() {
+                repaint_after_animation(&c);
+            }
+        });
         self.toasts.add_toast(toast.clone());
     }
 
@@ -294,6 +300,24 @@ impl Panel {
             self.show(token);
         }
     }
+}
+
+/// Forces a full repaint of `widget` once a closing animation has finished.
+///
+/// On macOS, GTK can leave thin stale stripes over the window after an overlay
+/// animates away, until the mouse moves over them. A plain `queue_draw` doesn't
+/// help: GTK only repaints regions whose content changed. Nudging the opacity
+/// for one frame changes everything, so the whole window is drawn again.
+fn repaint_after_animation(widget: &impl IsA<gtk::Widget>) {
+    let w = widget.as_ref().downgrade();
+    glib::timeout_add_local_once(std::time::Duration::from_millis(350), move || {
+        let Some(w) = w.upgrade() else { return };
+        w.set_opacity(0.999);
+        w.add_tick_callback(|w, _| {
+            w.set_opacity(1.0);
+            glib::ControlFlow::Break
+        });
+    });
 }
 
 pub fn build(app: &adw::Application, state: &Rc<AppState>) -> Panel {

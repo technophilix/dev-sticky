@@ -3,8 +3,9 @@
 #   ./scripts/uninstall.sh           remove the app, keep your notes
 #   ./scripts/uninstall.sh --purge   also delete your notes (~/.local/share/devsticky)
 #
-# Removes the per-user install made by scripts/install.sh, the "Start at Login"
-# entry, and (with sudo) the .deb / .rpm package if one is installed.
+# Linux: removes the per-user install made by scripts/install.sh, the "Start at
+# Login" entry, and (with sudo) the .deb / .rpm package if one is installed.
+# macOS: removes DevSticky.app, the "Start at Login" item, caches and settings.
 set -eu
 APP_ID=io.github.technophilix.DevSticky
 BIN_DIR="${HOME}/.local/bin"
@@ -15,13 +16,30 @@ PURGE=false
 for arg in "$@"; do
   case "$arg" in
     --purge) PURGE=true ;;
-    -h|--help) sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Unknown option: $arg (try --help)" >&2; exit 1 ;;
   esac
 done
 
 # Stop the running app so it doesn't stay in the top bar.
 pkill -x devsticky 2>/dev/null || true
+
+if [ "$(uname -s)" = Darwin ]; then
+  # "Start at Login": unload the LaunchAgent before deleting it.
+  launchctl bootout "gui/$(id -u)/$APP_ID" 2>/dev/null || true
+  rm -f "$HOME/Library/LaunchAgents/$APP_ID.plist"
+  for app in /Applications/DevSticky.app "$HOME/Applications/DevSticky.app"; do
+    [ -e "$app" ] || continue
+    if ! rm -rf "$app" 2>/dev/null; then
+      echo "Removing $app (needs sudo)…"
+      sudo rm -rf "$app"
+    fi
+  done
+  rm -rf "$HOME/Library/Caches/$APP_ID" \
+         "$HOME/Library/Saved Application State/$APP_ID.savedState"
+  defaults delete "$APP_ID" >/dev/null 2>&1 || true
+  rm -f "$HOME/Library/Preferences/$APP_ID.plist"
+fi
 
 # Per-user install (scripts/install.sh).
 rm -f "$BIN_DIR/devsticky" \

@@ -269,30 +269,27 @@ fn check_for_updates(action: &gio::SimpleAction, panel: &list_window::Panel) {
     });
 }
 
+/// A message with a Download button instead of a dialog: the dialog's dimmed
+/// backdrop left stale stripes over the panel on macOS when it was cancelled.
 fn offer_update(panel: &list_window::Panel, release: &updates::Release) {
-    let dialog = adw::AlertDialog::builder()
-        .heading("Update Available")
-        .body(format!(
-            "DevSticky {} is available. You have {}.\n\nDownload the new version from the release page and install it over this one; your notes are kept.",
+    let toast = adw::Toast::builder()
+        .title(format!(
+            "DevSticky {} is available (you have {})",
             release.version,
             updates::CURRENT_VERSION
         ))
-        .close_response("later")
-        .default_response("download")
+        .button_label("Download")
+        .timeout(0) // stays until Download or ✕
         .build();
-    dialog.add_responses(&[("later", "Later"), ("download", "Download")]);
-    dialog.set_response_appearance("download", adw::ResponseAppearance::Suggested);
     let (url, window) = (release.url.clone(), panel.window.clone());
-    dialog.connect_response(None, move |_, response| {
-        if response == "download" {
-            gtk::UriLauncher::new(&url).launch(Some(&window), gio::Cancellable::NONE, |res| {
-                if let Err(e) = res {
-                    eprintln!("devsticky: opening the release page failed: {e}");
-                }
-            });
-        }
+    toast.connect_button_clicked(move |_| {
+        gtk::UriLauncher::new(&url).launch(Some(&window), gio::Cancellable::NONE, |res| {
+            if let Err(e) = res {
+                eprintln!("devsticky: opening the release page failed: {e}");
+            }
+        });
     });
-    dialog.present(Some(&panel.window));
+    panel.add_toast(&toast);
 }
 
 /// Makes the app active so a window shown from the top bar gets focus at once.

@@ -68,6 +68,9 @@ cargo run --release        # just try it
 
 This removes the `~/.local` install, the "Start at Login" entry, and the
 `.deb`/`.rpm` package if one is installed (asks for your sudo password).
+On macOS it removes `DevSticky.app` from Applications, the Start at Login item,
+and DevSticky's caches and settings. Notes are in `~/.local/share/devsticky` on
+macOS too, and `--purge` deletes them.
 Installed from a package? `sudo apt remove devsticky` or `sudo dnf remove devsticky`
 also works, but leaves the Start at Login entry and your notes in
 `~/.local/share/devsticky`.
