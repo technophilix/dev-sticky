@@ -269,8 +269,8 @@ fn check_for_updates(action: &gio::SimpleAction, panel: &list_window::Panel) {
     });
 }
 
-/// A message with a Download button instead of a dialog: the dialog's dimmed
-/// backdrop left stale stripes over the panel on macOS when it was cancelled.
+/// A message with a Download button rather than a dialog, which would dim the
+/// whole panel.
 fn offer_update(panel: &list_window::Panel, release: &updates::Release) {
     let toast = adw::Toast::builder()
         .title(format!(
@@ -449,6 +449,7 @@ fn main() -> glib::ExitCode {
         #[cfg(target_os = "macos")]
         {
             macos::hide_from_dock();
+            macos::disable_animations();
             if let Some(single_instance::Instance::Primary { launches, .. }) = &instance {
                 let (app, state, list, launches) =
                     (app.clone(), state.clone(), list.clone(), launches.clone());

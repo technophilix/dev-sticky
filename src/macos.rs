@@ -32,3 +32,14 @@ pub fn deactivate() {
         app.deactivate();
     }
 }
+
+/// Turns off GTK's (and libadwaita's) animations.
+///
+/// On macOS, GTK doesn't redraw fading overlays cleanly: when a message (toast)
+/// or dialog faded out, the panel showed stripes or went see-through until it
+/// was redrawn. Without animations they appear and disappear instantly.
+pub fn disable_animations() {
+    if let Some(settings) = gtk::Settings::default() {
+        settings.set_gtk_enable_animations(false);
+    }
+}
